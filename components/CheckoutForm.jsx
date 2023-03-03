@@ -1,101 +1,75 @@
-import React from "react";
-import {
-  PaymentElement,
-  LinkAuthenticationElement,
-  useStripe,
-  useElements
-} from "@stripe/react-stripe-js";
+import React, { useEffect, useState } from "react";
+import Script from 'next/script'
 
-export default function CheckoutForm() {
-  const stripe = useStripe();
-  const elements = useElements();
+export default function CheckoutForm(props) {
+  const [message, setMessage] = useState("");
+  const [isLoaded, setIsLoaded] = React.useState(false);
+  const [exactJSReady, setExactJSReady] = React.useState(false);
+  const [exactJS, setExactJS ] = useState(null)
 
-  const [email, setEmail] = React.useState('');
-  const [message, setMessage] = React.useState(null);
-  const [isLoading, setIsLoading] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!stripe) {
-      return;
+  useEffect(() =>{
+    if (props.token !== ""){
+      onOrderCreated()
     }
-
-    const clientSecret = new URLSearchParams(window.location.search).get(
-      "payment_intent_client_secret"
-    );
-
-    if (!clientSecret) {
-      return;
+  }, [props.token])
+  
+  const onOrderCreated = () => {
+    if (!exactJSReady) {
+      setTimeout(initExactJS, 500);
+      return
+    };
+    if (isLoaded){
+      return
     }
+    initExactJS()
+  }
 
-    stripe.retrievePaymentIntent(clientSecret).then(({ paymentIntent }) => {
-      switch (paymentIntent.status) {
-        case "succeeded":
-          setMessage("Payment succeeded!");
-          break;
-        case "processing":
-          setMessage("Your payment is processing.");
-          break;
-        case "requires_payment_method":
-          setMessage("Your payment was not successful, please try again.");
-          break;
-        default:
-          setMessage("Something went wrong.");
-          break;
-      }
+  const initExactJS = () => {
+    const exact = ExactJS(props.token)
+    console.log(props.token)
+    const components = exact.components({orderId: props.orderId});
+    components.addCard('payment-element');
+
+    exact.on("payment-complete", (payload) => {
+        setMessage("Payment complete");
+        document.getElementById('payment_id').value  = payload.paymentId;
+        document.getElementById("payment_form").submit();
     });
-  }, [stripe]);
+    
+    exact.on("payment-failed", (payload) => {
+        setMessage("Payment failed");
+        console.debug(payload);
+    });
+    setExactJS(exact)
 
-  const handleSubmit = async (e) => {
+    setIsLoaded(true)
+    
+  }
+
+  const onExactJSReady = () => {
+    setExactJSReady(true)
+  }
+
+  const handleSubmit = (e) => {
     e.preventDefault();
+    exactJS.payOrder();
+  }
 
-    if (!stripe || !elements) {
-      // Stripe.js has not yet loaded.
-      // Make sure to disable form submission until Stripe.js has loaded.
-      return;
-    }
-
-    setIsLoading(true);
-
-    const { error } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        // Make sure to change this to your payment completion page
-        return_url: "http://localhost:3000",
-      },
-    });
-
-    // This point will only be reached if there is an immediate error when
-    // confirming the payment. Otherwise, your customer will be redirected to
-    // your `return_url`. For some payment methods like iDEAL, your customer will
-    // be redirected to an intermediate site first to authorize the payment, then
-    // redirected to the `return_url`.
-    if (error.type === "card_error" || error.type === "validation_error") {
-      setMessage(error.message);
-    } else {
-      setMessage("An unexpected error occurred.");
-    }
-
-    setIsLoading(false);
-  };
-
-  const paymentElementOptions = {
-    layout: "tabs",
-  };
 
   return (
-    <form id="payment-form" onSubmit={handleSubmit}>
-      <LinkAuthenticationElement
-        id="link-authentication-element"
-        onChange={(e) => {if (e.target) setEmail(e.target.value)}}
-      />
-      <PaymentElement id="payment-element" options={paymentElementOptions} />
-      <button disabled={isLoading || !stripe || !elements} id="submit">
-        <span id="button-text">
-          {isLoading ? <div className="spinner" id="spinner"></div> : "Pay now"}
-        </span>
-      </button>
-      {/* Show any error or success messages */}
-      {message && <div id="payment-message">{message}</div>}
-    </form>
+    <>
+      <Script src="https://api.exactpaysandbox.com/js/v1/exact.js" strategy="afterInteractive" onReady={onExactJSReady}/>
+       <form id="payment_form" action="api/not-webhooks" method="post" onSubmit={handleSubmit}>
+        <div id="payment-element"/>
+        <button id="submit_button">
+          <span id="button-text">
+            {!isLoaded ? <div className="spinner" id="spinner"></div> : "Pay now"}
+          </span>
+        </button>
+        <input id="payment_id" name="payment_id" type="hidden" />
+        {/* Show any error or success messages*/}
+        {message && <div id="payment-message">{message}</div>}
+      </form> 
+    </>
   );
 }
